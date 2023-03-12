@@ -1,5 +1,6 @@
-Teaching library for weighted finite-state machines, weighted context-free grammars and other cool stuff.
-Implementaton programmed by Ryan Cotterell and Anej Svete. 
+A teaching library for proving the Turing completeness of recurrent neural network language models. 
+Implementaton programmed by Ryan Cotterell and Anej Svete.
+The inspiration for the "proof by code" is Siegelmann and Sontag (1995) [https://binds.cs.umass.edu/papers/1995_Siegelmann_JComSysSci.pdf]. 
 
 to start run:
 ```bash

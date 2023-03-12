@@ -7,3 +7,8 @@ $ git clone git@github.com:rycolab/rnn-turing-completeness.git
 $ cd rnn-turing-completeness
 $ pip install -e .
 ```
+
+to unit-test the code, run
+``
+pytest .
+``

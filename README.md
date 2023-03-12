@@ -1,4 +1,5 @@
 Teaching library for weighted finite-state machines, weighted context-free grammars and other cool stuff.
+Implementaton programmed by Ryan Cotterell and Anej Svete. 
 
 to start run:
 ```bash

@@ -1,0 +1,12 @@
+__pycache__
+.ipynb_checkpoints
+notebooks/.ipynb_checkpoints
+turnn.egg-info
+.idea
+.DS_Store
+.vscode
+/data
+.history
+
+
+testing.ipynb

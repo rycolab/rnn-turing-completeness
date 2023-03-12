@@ -9,6 +9,6 @@ $ pip install -e .
 ```
 
 to unit-test the code, run
-``
+```
 pytest .
-``
+```

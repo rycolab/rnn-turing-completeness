@@ -421,18 +421,12 @@ class TwoStackRNN:
         self.U[Index.CONF_0_BOT_b, Index.STACK1_EMPTY] = Rational(-10)
         self.U[Index.CONF_0_0_b, Index.STACK1_EMPTY] = Rational(-10)
         self.U[Index.CONF_0_1_b, Index.STACK1_EMPTY] = Rational(-10)
-        # self.U[Index.CONF_0_BOT_EOS, Index.STACK1_EMPTY] = Rational(-10)
-        # self.U[Index.CONF_0_0_EOS, Index.STACK1_EMPTY] = Rational(-10)
-        # self.U[Index.CONF_0_1_EOS, Index.STACK1_EMPTY] = Rational(-10)
         self.U[Index.CONF_1_BOT_a, Index.STACK1_EMPTY] = Rational(-10)
         self.U[Index.CONF_1_0_a, Index.STACK1_EMPTY] = Rational(-10)
         self.U[Index.CONF_1_1_a, Index.STACK1_EMPTY] = Rational(-10)
         self.U[Index.CONF_1_BOT_b, Index.STACK1_EMPTY] = Rational(-10)
         self.U[Index.CONF_1_0_b, Index.STACK1_EMPTY] = Rational(-10)
         self.U[Index.CONF_1_1_b, Index.STACK1_EMPTY] = Rational(-10)
-        # self.U[Index.CONF_1_BOT_EOS, Index.STACK1_EMPTY] = Rational(-10)
-        # self.U[Index.CONF_1_0_EOS, Index.STACK1_EMPTY] = Rational(-10)
-        # self.U[Index.CONF_1_1_EOS, Index.STACK1_EMPTY] = Rational(-10)
 
         self.U[Index.CONF_BOT_0_a, Index.STACK2_EMPTY] = Rational(-10)
         self.U[Index.CONF_0_0_a, Index.STACK2_EMPTY] = Rational(-10)
@@ -446,12 +440,6 @@ class TwoStackRNN:
         self.U[Index.CONF_BOT_1_b, Index.STACK2_EMPTY] = Rational(-10)
         self.U[Index.CONF_0_1_b, Index.STACK2_EMPTY] = Rational(-10)
         self.U[Index.CONF_1_1_b, Index.STACK2_EMPTY] = Rational(-10)
-        # self.U[Index.CONF_0_BOT_EOS, Index.STACK2_EMPTY] = Rational(-10)
-        # self.U[Index.CONF_0_0_EOS, Index.STACK2_EMPTY] = Rational(-10)
-        # self.U[Index.CONF_0_1_EOS, Index.STACK2_EMPTY] = Rational(-10)
-        # self.U[Index.CONF_1_BOT_EOS, Index.STACK2_EMPTY] = Rational(-10)
-        # self.U[Index.CONF_1_0_EOS, Index.STACK2_EMPTY] = Rational(-10)
-        # self.U[Index.CONF_1_1_EOS, Index.STACK2_EMPTY] = Rational(-10)
 
     def initialize_transition_function(self):
         # transition function
@@ -735,15 +723,8 @@ class TwoStackRNN:
         def apply(_h):
             tmp = self.U * _h + self.V * self.one_hot.col(sym2idx[a]) + self.b
 
-            print("\nINPUT ENCODING:")
-            self.disp(self.V * self.one_hot.col(sym2idx[a]))
-            print("-------\n")
-
-            print("\nTRANSITION VECTOR:")
-            self.disp(self.U * _h)
-            print("-------\n")
-
             self.disp(tmp)
+
             h2 = zeros(self.D, 1, dtype=Rational(0))
 
             for i in range(self.D):
@@ -751,7 +732,7 @@ class TwoStackRNN:
             return h2
 
         h = self.h
-        print("\n\n\n\n\n\n >>>> START:")
+        print("\n\n\n\n >>>> START:")
         self.disp(h)
         print(cantor_decode(h[Index.STACK1]), cantor_decode(h[Index.STACK2]))
 

@@ -1,3 +1,8 @@
+"""This module implements an RNN simulating a two-stack PDA.
+The construction is original but based on the one in Siegelmann and Sontag (1995) 
+[https://binds.cs.umass.edu/papers/1995_Siegelmann_JComSysSci.pdf]"""
+
+from typing import List
 from enum import IntEnum, unique
 from itertools import product
 from pprint import pprint
@@ -14,12 +19,12 @@ x = Symbol("x")
 
 @unique
 class Index(IntEnum):
-    """This class is used to index the hidden state of the Siegelmann RNN for two
+    """This class is used to index the hidden state of the RNN for two
     stacks by naming the individual dimensions of the hidden state with the role
     they play in simulating the two-stack PDA.
     """
 
-    # commands
+    # (1) Data component
     STACK1 = 0
     STACK2 = 1
     BUFFER11 = 2
@@ -27,11 +32,13 @@ class Index(IntEnum):
     BUFFER21 = 4
     BUFFER22 = 5
 
+    # (2) Phase component
     PHASE1 = 6
     PHASE2 = 7
     PHASE3 = 8
     PHASE4 = 9
 
+    # (3) Stack configuration component
     STACK1_EMPTY = 10
     STACK1_ZERO = 11
     STACK1_ONE = 12
@@ -39,8 +46,9 @@ class Index(IntEnum):
     STACK2_ZERO = 14
     STACK2_ONE = 15
 
+    # (4) Stack and input configuration component
     # `CONF_γ1_γ2_a` corresponds to the configuration
-    # where the top of the stack is `γ1`, `γ2` and the next symbol is `a`
+    # where the tops of the two stacks are `γ1` and `γ2` and the next symbol is `a`
     CONF_BOT_BOT_EOS = 16
     CONF_BOT_0_EOS = 17
     CONF_BOT_1_EOS = 18
@@ -69,6 +77,7 @@ class Index(IntEnum):
     CONF_1_0_b = 41
     CONF_1_1_b = 42
 
+    # (5) Computation component
     STACK1_PUSH_0 = 43
     STACK1_PUSH_1 = 44
     STACK1_POP_0 = 45
@@ -80,9 +89,11 @@ class Index(IntEnum):
     STACK2_POP_1 = 51
     STACK2_NOOP = 52
 
+    # (6) Acceptance component
     ACCEPT = 53
 
 
+# We use a two-letter alphabet {a, b} and the EOS symbol.
 sym2idx = {
     Sym("a"): 0,
     Sym("b"): 1,
@@ -90,7 +101,17 @@ sym2idx = {
 }
 
 
-def cantor_decode(x):
+def cantor_decode(x) -> List[Sym]:
+    """
+    This simply decodes the value of the cell in the hidden state representing a stack
+    into a sequence of symbols.
+
+    Args:
+        x: The value to be decoded into a sequence of symbols.
+
+    Returns:
+        List[Sym]: The decoded sequence of symbols.
+    """
     stack = [BOT]
     if x.p == 0:
         return stack
@@ -99,7 +120,12 @@ def cantor_decode(x):
     )
 
 
-def conf_peek(x):  # noqa: C901
+def conf_peek(x: Index):  # noqa: C901
+    """Converts the index of the configuration into a human-readable string.
+
+    Args:
+        x (Index): THe index of the configuration.
+    """
     if x == Index.CONF_BOT_BOT_EOS:
         print("(⊥, ⊥, EOS)")
     elif x == Index.CONF_BOT_0_EOS:
@@ -150,7 +176,21 @@ def conf_peek(x):  # noqa: C901
     raise NotImplementedError
 
 
-def conf2idx(γ1: Sym, γ2: Sym, sym: Sym):  # noqa: C901
+def conf2idx(γ1: Sym, γ2: Sym, sym: Sym) -> Index:  # noqa: C901
+    """Converts a configuration (tops of the stacks and the input symbol)
+    into an index in the matrices.
+
+    Args:
+        γ1 (Sym): The top of the first stack.
+        γ2 (Sym): The top of the second stack.
+        sym (Sym): The input symbol.
+
+    Raises:
+        NotImplementedError: If the configuration is not supported.
+
+    Returns:
+        Index: The index of the configuration.
+    """
     if (γ1, γ2, sym) == (BOT, BOT, EOS):
         return Index.CONF_BOT_BOT_EOS
     elif (γ1, γ2, sym) == (BOT, Sym("0"), EOS):
@@ -210,6 +250,39 @@ def conf2idx(γ1: Sym, γ2: Sym, sym: Sym):  # noqa: C901
 
 
 class TwoStackRNN:
+    """
+    An implementation of an Elman RNN that simulates a two-stack PDA.
+    It computes the next state h_t+1 from the current state h_t by applying the
+    Elman update rule four times:
+    h' = σ(U * h + V * y + b)
+    where the matrices U, V and the vector b are computed from the PDA and
+    the input symbol y is one-hot encoded.
+    After four applications of the update rule, the new hidden state represents the
+    new configuration of the PDA.
+
+    The hidden state is composed of six components:
+    1. The data component
+    2. The phase component
+    3. The stack configurations component
+    4. The stacks and input configuration component
+    5. The computation component
+    6. The acceptance component
+
+    1. The first component contains the cells containing the encodings of the two stacks
+    along with two buffer cells for each stack through which the stack is passed
+    during the four-stage computation.
+    2. The second component simply denotes the current phase of the computation, and is
+    only included for keeping track of the computation.
+    3. The third component contains the encoding of the stack at the current time step,
+    i.e., it flags whether the stacks are empty or have a 0/1 on the top.
+    4. The fourth component contains the encoding of the current input symbol together
+    with the stacks.
+    5. The fifth component contains cells to which the current stack configuration is
+    copied and modified according to the action of the PDA.
+    6. The sixth component contains a cell that are set to 1 after reading in the EOS
+    symbol if the PDA accepts the input string appearing before EOS.
+    """
+
     def __init__(self, pda: TwoStackPDA):
         self.pda = pda
         self.Σ = pda.Σ.union({EOS})  # In contrast to the globally normalized PDA,
@@ -232,7 +305,6 @@ class TwoStackRNN:
         # One-hot encoding of the input symbols
         self.one_hot = eye(len(self.Σ), dtype=Rational(0))
 
-        # We start with an zero hidden state in phase 1
         # We start with an zero hidden state in phase 1
         self.h = zeros(self.D, 1, dtype=Rational(0))
         self.reset()
@@ -311,12 +383,14 @@ class TwoStackRNN:
         print()
 
     def make_buffer_transitions(self):
-        # This submatrix encodes the copying of the stack contents between
-        # the three different stacks simulated by the RNN in the hidden state
-        # while it moves through the 4 phases of the hidden state update.
-        # Each of the stacks is simply a dimension in the hidden state.
-        # Each of the three stacks is copied to the next one,
-        # and the last one is zeroed out.
+        """
+        Constructs the submatrix encodes the copying of the stack contents between
+        the three different stacks simulated by the RNN in the hidden state
+        while it moves through the 4 phases of the hidden state update.
+        Each of the stacks is simply a dimension in the hidden state.
+        Each of the three stacks is copied to the next one,
+        and the last one is zeroed out.
+        """
         self.U[Index.STACK1, Index.STACK1] = Rational(0)  # delete
         self.U[Index.BUFFER11, Index.STACK1] = Rational(1)  # copy over to the next one
         self.U[Index.BUFFER11, Index.BUFFER11] = Rational(0)

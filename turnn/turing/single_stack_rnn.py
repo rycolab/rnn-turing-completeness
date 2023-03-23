@@ -246,9 +246,9 @@ class SingleStackRNN:
         # It erases the effects of always setting the PEEK0 bit to 1
         self.U[Index.CONF_0_a, Index.STACK_EMPTY] = Rational(-10)
         self.U[Index.CONF_0_b, Index.STACK_EMPTY] = Rational(-10)
+        self.U[Index.CONF_0_EOS, Index.STACK_EMPTY] = Rational(-10)
         self.U[Index.CONF_1_a, Index.STACK_EMPTY] = Rational(-10)
         self.U[Index.CONF_1_b, Index.STACK_EMPTY] = Rational(-10)
-        self.U[Index.CONF_1_EOS, Index.STACK_EMPTY] = Rational(-10)
         self.U[Index.CONF_1_EOS, Index.STACK_EMPTY] = Rational(-10)
 
     def initialize_transition_function(self):

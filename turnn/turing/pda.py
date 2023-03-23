@@ -16,7 +16,11 @@ class Action(IntEnum):
 
 class SingleStackPDA:
     def __init__(
-        self, Σ={Sym("a"), Sym("b")}, Γ={BOT, Sym("0"), Sym("1")}, seed: int = 42
+        self,
+        Σ={Sym("a"), Sym("b")},
+        Γ={BOT, Sym("0"), Sym("1")},
+        seed: int = 42,
+        randomize: bool = True,
     ):
         self.seed = seed
 
@@ -25,7 +29,8 @@ class SingleStackPDA:
 
         self.stack = [BOT]
         self.δ = {}
-        self._random_δ()
+        if randomize:
+            self._random_δ()
 
     def step(self, sym: Sym):
         assert sym in self.Σ

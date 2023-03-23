@@ -244,12 +244,12 @@ class SingleStackRNN:
 
         # This bit ensures that we can't be empty and non-empty
         # It erases the effects of always setting the PEEK0 bit to 1
-        self.U[Index.CONF_0_a, Index.STACK_EMPTY] = Rational(-10)
-        self.U[Index.CONF_0_b, Index.STACK_EMPTY] = Rational(-10)
-        self.U[Index.CONF_0_EOS, Index.STACK_EMPTY] = Rational(-10)
-        self.U[Index.CONF_1_a, Index.STACK_EMPTY] = Rational(-10)
-        self.U[Index.CONF_1_b, Index.STACK_EMPTY] = Rational(-10)
-        self.U[Index.CONF_1_EOS, Index.STACK_EMPTY] = Rational(-10)
+        self.U[Index.CONF_0_a, Index.STACK_EMPTY] = Rational(-1)
+        self.U[Index.CONF_0_b, Index.STACK_EMPTY] = Rational(-1)
+        self.U[Index.CONF_0_EOS, Index.STACK_EMPTY] = Rational(-1)
+        # self.U[Index.CONF_1_a, Index.STACK_EMPTY] = Rational(-10)
+        # self.U[Index.CONF_1_b, Index.STACK_EMPTY] = Rational(-10)
+        # self.U[Index.CONF_1_EOS, Index.STACK_EMPTY] = Rational(-10)
 
     def initialize_transition_function(self):
         # transition function
@@ -445,7 +445,7 @@ class SingleStackRNN:
 
         def apply(_h):
             tmp = self.U * _h + self.V * self.one_hot.col(self.sym2idx[a]) + self.b
-            print(self.disp(tmp))
+            # print(self.disp(tmp))
             h2 = zeros(self.D, 1, dtype=Rational(0))
 
             for i in range(self.D):
@@ -498,6 +498,33 @@ def test(seed: int = 42):
     rnn(Sym("a"))
     rnn(Sym("b"))
     rnn(Sym("a"))
+    rnn(EOS)
+
+    print(pda.stack)
+    print(cantor_decode(rnn.h[Index.STACK]))
+
+    print(pda.stack == cantor_decode(rnn.h[Index.STACK]))
+
+
+def notes_test():
+    pda = SingleStackPDA(randomize=False)
+
+    pda.δ[Sym("a")] = dict()
+    pda.δ[Sym("b")] = dict()
+
+    pda.δ[Sym("a")][BOT] = (Action.PUSH, Sym("0"))
+    pda.δ[Sym("a")][Sym("0")] = (Action.PUSH, Sym("1"))
+    pda.δ[Sym("a")][Sym("1")] = (Action.POP, Sym("1"))
+    pda.δ[Sym("b")][BOT] = (Action.PUSH, Sym("1"))
+    pda.δ[Sym("b")][Sym("0")] = (Action.POP, Sym("0"))
+    pda.δ[Sym("b")][Sym("1")] = (Action.NOOP, Sym("1"))
+
+    pda.step(Sym("a"))
+    pda.step(Sym("b"))
+
+    rnn = SingleStackRNN(pda)
+    rnn(Sym("a"))
+    rnn(Sym("b"))
     rnn(EOS)
 
     print(pda.stack)

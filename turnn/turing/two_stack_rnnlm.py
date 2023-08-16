@@ -4,7 +4,6 @@ The construction is original but based on the one in Siegelmann and Sontag (1995
 
 from enum import IntEnum, unique
 from itertools import product
-from pprint import pprint
 from typing import List
 
 from sympy import Abs, Matrix, Piecewise, Rational, Symbol, eye, sympify, zeros
@@ -301,6 +300,10 @@ class TwoStackRNN:
         self.make_U()
         self.make_b()
         self.make_V()
+
+        # Emission matrix E
+        self.E = zeros(len(self.Σ), self.D, dtype=Rational(0))
+        self.make_E()
 
         # One-hot encoding of the input symbols
         self.one_hot = eye(len(self.Σ), dtype=Rational(0))
@@ -784,6 +787,9 @@ class TwoStackRNN:
 
         self.b[Index.ACCEPT, 0] = Rational(1)
 
+    def make_E(self):
+        ...
+
     def __call__(self, a: Sym):
         """Performs a step of the Siegelmann RNN."""
         assert a in self.Σ
@@ -832,3 +838,4 @@ class TwoStackRNN:
         print("\n\n\n\n\n")
 
         return self.h, self.h[Index.ACCEPT]
+

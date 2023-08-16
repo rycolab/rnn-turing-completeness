@@ -1,10 +1,13 @@
 import random
 from enum import IntEnum, unique
 from itertools import product
-from typing import List, Tuple
+from math import log
+from typing import List, Tuple, Union
+
+import numpy as np
 
 from turnn.base.string import String
-from turnn.base.symbol import BOT, Sym
+from turnn.base.symbol import BOT, Sym, ε
 
 
 @unique
@@ -17,6 +20,7 @@ class Action(IntEnum):
 class SingleStackPDA:
     def __init__(
         self,
+        # Σ={Sym("a"), Sym("b"), ε},
         Σ={Sym("a"), Sym("b")},
         Γ={BOT, Sym("0"), Sym("1")},
         seed: int = 42,
@@ -27,55 +31,75 @@ class SingleStackPDA:
         self.Σ = Σ
         self.Γ = Γ
 
-        self.stack = [BOT]
-        self.δ = {}
+        # δ: Σ × Γ → (({PUSH, POP, NOOP} × Γ) × R)
+        self.δ = {sym: {γ: {} for γ in self.Γ} for sym in self.Σ}
         if randomize:
             self._random_δ()
 
-    def step(self, sym: Sym):
-        assert sym in self.Σ
+    def step(self, stack: List[Sym], a: Sym) -> Tuple[List[Sym], float]:
+        assert a in self.Σ
 
-        γ_top = self.stack[-1]
-        action, γ_new = self.δ[sym][γ_top]
+        γ = stack[-1]
+        action, γʼ = self.δ[a][γ][0]
 
         if action == Action.PUSH:
-            self.stack.append(γ_new)
+            stack.append(γʼ)
         elif action == Action.POP:
-            self.stack.pop()
+            stack.pop()
         elif action == Action.NOOP:
             pass
         else:
             raise Exception
 
-    def accept(self, y: String):
-        for sym in y:
-            self.step(sym)
+        return stack, self.δ[a][γ][1]
 
-        return self.stack == [BOT]
+    @property
+    def probabilistic(self):
+        d = {γ: 0 for γ in self.Γ}
+        for a, γ in product(self.Σ, self.Γ):
+            d[γ] += self.δ[a][γ][1]
+        return all(abs(d[γ] - 1) < 1e-6 for γ in self.Γ)
+
+    def accept(self, y: Union[str, String]) -> Tuple[bool, float]:
+        if isinstance(y, str):
+            y = String(y)
+
+        stack = [BOT]
+        logp = 0
+
+        for a in y:
+            stack, p = self.step(stack, a)
+            logp += log(p)
+            print(f"logp: {log(p)}")
+
+        return stack == [BOT], logp
+
+    def __call__(self, y: Union[str, String]) -> Tuple[bool, float]:
+        return self.accept(y)
 
     def _random_δ(self):
-        random.seed(self.seed)
+        rng = np.random.default_rng(self.seed)
 
-        pushes = {(Action.PUSH, γ) for γ in self.Γ if γ != BOT}
+        pushes = list((Action.PUSH, γ) for γ in (self.Γ - {BOT}))
 
-        for sym in self.Σ:
-            if sym not in self.δ:
-                self.δ[sym] = {}
-            for γ in self.Γ:
+        for γ in self.Γ:
+            # The possible actions have to form a probability distribution for every γ.
+            α = rng.dirichlet(np.ones(len(self.Σ)))
+            for ii, a in enumerate(self.Σ):
                 if γ == BOT:
-                    flip = random.randint(0, 1)
+                    flip = rng.integers(0, 1, endpoint=True)
                     if flip == 0:
-                        self.δ[sym][γ] = (Action.NOOP, γ)
+                        self.δ[a][γ] = ((Action.NOOP, γ), α[ii])
                     else:
-                        self.δ[sym][γ] = random.choice(list(pushes))
+                        self.δ[a][γ] = (tuple(rng.choice(pushes)), α[ii])
                 else:
-                    flip = random.randint(0, 2)
+                    flip = rng.integers(0, 2, endpoint=True)
                     if flip == 0:
-                        self.δ[sym][γ] = (Action.NOOP, γ)
+                        self.δ[a][γ] = ((Action.NOOP, γ), α[ii])
                     elif flip == 1:
-                        self.δ[sym][γ] = (Action.POP, γ)
+                        self.δ[a][γ] = ((Action.POP, γ), α[ii])
                     else:
-                        self.δ[sym][γ] = random.choice(list(pushes))
+                        self.δ[a][γ] = (tuple(rng.choice(pushes)), α[ii])
 
 
 class TwoStackPDA:

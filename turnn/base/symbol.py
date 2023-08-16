@@ -21,7 +21,6 @@ class Sym:
 ε = Sym("ε")
 
 # String sybols
-BOS = Sym("BOS")
 EOS = Sym("EOS")
 
 # Stack symbols

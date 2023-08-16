@@ -1,51 +1,76 @@
 from enum import IntEnum, unique
+from typing import Tuple, Union
 
-from sympy import Abs, Matrix, Piecewise, Rational, Symbol, eye, sympify, zeros
+from sympy import (
+    Abs,
+    Matrix,
+    Piecewise,
+    Rational,
+    Symbol,
+    exp,
+    eye,
+    log,
+    sympify,
+    zeros,
+)
 
 from turnn.base.string import String
-from turnn.base.symbol import BOT, EOS, Sym
+from turnn.base.symbol import BOT, EOS, Sym, ε
 from turnn.turing.pda import Action, SingleStackPDA
 
 x = Symbol("x")
 σ = Piecewise((Rational(0), x <= 0), (Rational(1), x >= 1), (Abs(x) <= sympify(1)))
 
 
+def softmax(h):
+    return exp(h) / sum(exp(h))
+
+
 @unique
 class Index(IntEnum):
-    # commands
+    # (1) Data component
     STACK = 0
     BUFFER1 = 1
     BUFFER2 = 2
 
+    # (2) Phase component
     PHASE1 = 3
     PHASE2 = 4
     PHASE3 = 5
     PHASE4 = 6
 
+    # (3) Stack configuration component
+    # Since we assume a single-state machine, this is also
+    # the full configuration of the machine.
     STACK_EMPTY = 7
     STACK_ZERO = 8
     STACK_ONE = 9
 
-    # `CONF_γa` corresponds to the PDA configuration
-    # in which the top of the stack is `γ` and the next symbol is `a``
-    CONF_BOT_a = 10
-    CONF_BOT_b = 11
-    CONF_0_a = 12
-    CONF_0_b = 13
-    CONF_1_a = 14
-    CONF_1_b = 15
-    CONF_BOT_EOS = 16
+    # (4) Stack and input configuration component
+    # `CONF_γ_a` corresponds to the configuration
+    # where the top of the stack is `γ` and the next symbol is `a`
+    CONF_BOT_ε = 10
+    CONF_BOT_a = 11
+    CONF_BOT_b = 12
+    CONF_BOT_EOS = 13
+    CONF_0_ε = 14
+    CONF_0_a = 15
+    CONF_0_b = 16
     CONF_0_EOS = 17
-    CONF_1_EOS = 18
+    CONF_1_ε = 18
+    CONF_1_a = 19
+    CONF_1_b = 20
+    CONF_1_EOS = 21
 
-    PUSH_0 = 19
-    PUSH_1 = 20
-    POP_0 = 21
-    POP_1 = 22
-    NOOP = 23
+    # (5) Computation component
+    PUSH_0 = 22
+    PUSH_1 = 23
+    POP_0 = 24
+    POP_1 = 25
+    NOOP = 26
 
-    # Signals the acceptance of the input string
-    ACCEPT = 24
+    # (6) Acceptance component
+    ACCEPT = 27
 
 
 def cantor_decode(x):
@@ -81,25 +106,31 @@ def enc_peek(x):  # noqa: C901
 
 
 def conf2idx(γ: Sym, sym: Sym):  # noqa: C901
-    if (sym, γ) == (Sym("a"), BOT):
+    if (sym, γ) == (ε, BOT):
+        return Index.CONF_BOT_ε
+    elif (sym, γ) == (Sym("a"), BOT):
         return Index.CONF_BOT_a
     elif (sym, γ) == (Sym("b"), BOT):
         return Index.CONF_BOT_b
+    elif (sym, γ) == (EOS, BOT):
+        return Index.CONF_BOT_EOS
+    elif (sym, γ) == (ε, Sym("0")):
+        return Index.CONF_0_ε
     elif (sym, γ) == (Sym("a"), Sym("0")):
         return Index.CONF_0_a
     elif (sym, γ) == (Sym("b"), Sym("0")):
         return Index.CONF_0_b
+    elif (sym, γ) == (EOS, Sym("0")):
+        return Index.CONF_0_EOS
+    elif (sym, γ) == (ε, Sym("1")):
+        return Index.CONF_1_ε
     elif (sym, γ) == (Sym("a"), Sym("1")):
         return Index.CONF_1_a
     elif (sym, γ) == (Sym("b"), Sym("1")):
         return Index.CONF_1_b
-    elif (sym, γ) == (EOS, BOT):
-        return Index.CONF_BOT_EOS
-    elif (sym, γ) == (EOS, Sym("0")):
-        return Index.CONF_0_EOS
     elif (sym, γ) == (EOS, Sym("1")):
         return Index.CONF_1_EOS
-    raise Exception
+    raise ValueError("Unknown configuration: ({}, {}).".format(γ, sym))
 
 
 class SingleStackRNN:
@@ -124,35 +155,12 @@ class SingleStackRNN:
         self.make_b()
         self.make_V()
 
+        # Emission matrix E
+        self.E = zeros(len(self.Σ), self.D, dtype=Rational(0))
+        self.make_E()
+
         # One-hot encoding of the input symbols
         self.one_hot = eye(len(self.Σ), dtype=Rational(0))
-
-        # Embedding matrix of the input symbols
-        self.E = zeros(self.D, len(self.Σ), dtype=Rational(0))
-
-        # We start with an zero hidden state in phase 1
-        self.h = zeros(self.D, 1, dtype=Rational(0))
-        self.reset()
-
-    def reset(self):
-        """Sets the initial hidden state of the RNN to the zero vector
-        indicating the first phase."""
-        self.h = zeros(self.D, 1, dtype=Rational(0))
-        self.h[Index.PHASE1] = Rational(1)
-
-    def accept(self, y: String):
-        """Checks whether the RNN accepts the input string `y`.
-
-        Args:
-            y (String): The input string.
-
-        Returns:
-            bool: True if the RNN accepts the input string, False otherwise.
-        """
-        self.reset()
-        for sym in y:
-            self(sym)
-        return self.h[Index.ACCEPT] == Rational(1)
 
     def disp(self, h: Matrix):
         """Prints the content of the hidden state of the RNN, separated by
@@ -244,6 +252,9 @@ class SingleStackRNN:
 
         # This bit ensures that we can't be empty and non-empty
         # It erases the effects of always setting the PEEK0 bit to 1
+        self.U[Index.STACK_ZERO, Index.STACK_EMPTY] = Rational(-3)
+        self.U[Index.STACK_ZERO, Index.STACK_EMPTY] = Rational(-3)
+        self.U[Index.STACK_ZERO, Index.STACK_EMPTY] = Rational(-3)
         self.U[Index.CONF_0_a, Index.STACK_EMPTY] = Rational(-1)
         self.U[Index.CONF_0_b, Index.STACK_EMPTY] = Rational(-1)
         self.U[Index.CONF_0_EOS, Index.STACK_EMPTY] = Rational(-1)
@@ -274,23 +285,23 @@ class SingleStackRNN:
                 self.U[Index.NOOP, conf2idx(Sym("1"), EOS)] = Rational(0)
                 continue
 
-            for γ_top in self.pda.δ[sym]:
-                action, γ_new = self.pda.δ[sym][γ_top]
-                conf = conf2idx(γ_top, sym)
+            for γ in self.pda.δ[sym]:
+                action, γʼ = self.pda.δ[sym][γ][0]
+                conf = conf2idx(γ, sym)
 
-                if action == Action.PUSH and γ_new == Sym("0"):
+                if action == Action.PUSH and γʼ == Sym("0"):
                     # If the PDA stack top is γ1 and sym is read, simulate PUSHing 0
                     # According to the PDA: if we were in the configuration encoded by
                     # conf, and we read sym, we would push 0 onto the stack.
                     self.U[Index.PUSH_0, conf] = Rational(0)
-                elif action == Action.PUSH and γ_new == Sym("1"):
+                elif action == Action.PUSH and γʼ == Sym("1"):
                     # If the PDA stack top is γ1 and sym is read, simulate PUSHing 1
                     self.U[Index.PUSH_1, conf] = Rational(0)
-                elif action == Action.POP and γ_new == Sym("0"):
+                elif action == Action.POP and γʼ == Sym("0"):
                     # If the PDA stack top is γ1 and sym is read,
                     # simulate POPping γ1 (0)
                     self.U[Index.POP_0, conf] = Rational(0)
-                elif action == Action.POP and γ_new == Sym("1"):
+                elif action == Action.POP and γʼ == Sym("1"):
                     # If the PDA stack top is γ1 and sym is read,
                     # simulate POPping γ1 (1)
                     self.U[Index.POP_1, conf] = Rational(0)
@@ -298,7 +309,7 @@ class SingleStackRNN:
                     self.U[Index.NOOP, conf] = Rational(0)
                 else:
                     raise ValueError(
-                        "Unknown action: action: {}, γ_new: {}.".format(action, γ_new)
+                        "Unknown action: action: {}, γʼ: {}.".format(action, γʼ)
                     )
 
     def make_action_executor(self):
@@ -433,7 +444,47 @@ class SingleStackRNN:
 
         self.b[Index.ACCEPT, 0] = Rational(1)
 
-    def __call__(self, a: Sym):
+    def make_E(self):
+        for a in self.Σ - {EOS}:
+            d = self.sym2idx[a]
+            self.E[d, Index.STACK_EMPTY] = log(self.pda.δ[a][BOT][1])
+            self.E[d, Index.STACK_ZERO] = log(self.pda.δ[a][Sym("0")][1])
+            self.E[d, Index.STACK_ONE] = log(self.pda.δ[a][Sym("1")][1])
+
+    def initial_hidden_state(self) -> Matrix:
+        """Sets the initial hidden state of the RNN to the zero vector
+        indicating the first phase."""
+        # We start with an zero hidden state in phase 1
+        h = zeros(self.D, 1, dtype=Rational(0))
+        h[Index.PHASE1] = Rational(1)
+        return h
+
+    def accept(self, y: Union[str, String]) -> Tuple[bool, float]:
+        """Checks whether the RNN accepts the input string `y`.
+
+        Args:
+            y (String): The input string.
+
+        Returns:
+            bool: True if the RNN accepts the input string, False otherwise.
+        """
+        if isinstance(y, str):
+            y = String(y)
+        y.y += [EOS]
+
+        h, logp = self.initial_hidden_state(), Rational(0)
+        for a in y:
+            print(f"sym = {a}")
+            h, _acc, _logp = self.step(h, a)
+            print(f"logp = {_logp}")
+            logp += _logp
+
+        return h[Index.ACCEPT] == Rational(1), logp
+
+    def __call__(self, y: Union[str, String]) -> Tuple[bool, float]:
+        return self.accept(y)
+
+    def step(self, h: Matrix, a: Sym) -> Tuple[Matrix, Rational, Rational]:
         """Performs a step of the RNN."""
         assert a in self.Σ
 
@@ -444,37 +495,35 @@ class SingleStackRNN:
         # 4) Consolidate
 
         def apply(_h):
-            tmp = self.U * _h + self.V * self.one_hot.col(self.sym2idx[a]) + self.b
-            # print(self.disp(tmp))
-            h2 = zeros(self.D, 1, dtype=Rational(0))
+            z = self.U * _h + self.V * self.one_hot.col(self.sym2idx[a]) + self.b
+            hʼ = zeros(self.D, 1, dtype=Rational(0))
 
             for i in range(self.D):
-                h2[i] = σ.subs(x, tmp[i])
-            return h2
+                hʼ[i] = σ.subs(x, z[i])
+            return hʼ
 
-        h = self.h
-        print("\n\n\n\n\n\n >>>> START:")
-        self.disp(h)
-        print(cantor_decode(h[Index.STACK]))
+        # print("\n\n\n\n\n\n >>>> START:")
+        # self.disp(h)
+        # print(cantor_decode(h[Index.STACK]))
 
         print("\n\n\n\n----------------------------\n>>>>> PHASE 1")
         h = apply(h)
-        print(cantor_decode(h[Index.STACK]))
+        # print(cantor_decode(h[Index.STACK]))
         self.disp(h)
         print("\n\n\n\n----------------------------\n>>>>> PHASE 2")
         h = apply(h)
-        print(cantor_decode(h[Index.STACK]))
+        # print(cantor_decode(h[Index.STACK]))
         self.disp(h)
-        print("\n\n\n\n----------------------------\n>>>>> PHASE 3")
+        logits = self.E * h
+        # print("\n\n\n\n----------------------------\n>>>>> PHASE 3")
         h = apply(h)
-        print(cantor_decode(h[Index.STACK]))
-        self.disp(h)
-        print("\n\n\n\n----------------------------\n>>>>> PHASE 4")
+        # print(cantor_decode(h[Index.STACK]))
+        # self.disp(h)
+        # print("\n\n\n\n----------------------------\n>>>>> PHASE 4")
         h = apply(h)
-        print(cantor_decode(h[Index.STACK]))
-        self.disp(h)
-        print(cantor_decode(h[Index.STACK]))
-        self.disp(h)
-        self.h = h
+        # print(cantor_decode(h[Index.STACK]))
+        # self.disp(h)
+        # print(cantor_decode(h[Index.STACK]))
+        # self.disp(h)
 
-        return self.h, self.h[Index.ACCEPT]
+        return h, h[Index.ACCEPT], logits[self.sym2idx[a]]

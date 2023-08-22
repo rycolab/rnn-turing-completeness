@@ -4,10 +4,12 @@ The construction is original but based on the one in Siegelmann and Sontag (1995
 
 from enum import IntEnum, unique
 from itertools import product
-from typing import List
+from typing import List, Tuple, Union
 
-from sympy import Abs, Matrix, Piecewise, Rational, Symbol, eye, sympify, zeros
+from sympy import (Abs, Matrix, Piecewise, Rational, Symbol, eye, log, sympify,
+                   zeros)
 
+from turnn.base.string import String
 from turnn.base.symbol import BOT, EOS, Sym
 from turnn.turing.pda import Action, TwoStackPDA
 
@@ -90,6 +92,18 @@ class Index(IntEnum):
 
     # (6) Acceptance component
     ACCEPT = 53
+
+
+class EmissionIndex(IntEnum):
+    CONF_BOTBOT = 0
+    CONF_BOT0 = 1
+    CONF_BOT1 = 2
+    CONF_0BOT = 3
+    CONF_1BOT = 4
+    CONF_00 = 5
+    CONF_01 = 6
+    CONF_10 = 7
+    CONF_11 = 8
 
 
 # We use a two-letter alphabet {a, b} and the EOS symbol.
@@ -287,6 +301,8 @@ class TwoStackRNN:
         self.Σ = pda.Σ.union({EOS})  # In contrast to the globally normalized PDA,
         # the RNN works with an EOS symbol
 
+        self.sym2idx = {sym: idx for idx, sym in enumerate(self.Σ)}
+
         # The dimension of the hidden state
         self.D = len(Index)
 
@@ -302,21 +318,13 @@ class TwoStackRNN:
         self.make_V()
 
         # Emission matrix E
-        self.E = zeros(len(self.Σ), self.D, dtype=Rational(0))
-        self.make_E()
+        self.W = zeros(9, self.D, dtype=Rational(0))
+        self.bw = zeros(9, 1, dtype=Rational(0))
+        self.E = zeros(len(self.Σ), 9, dtype=Rational(0))
+        self.make_emission_params()
 
         # One-hot encoding of the input symbols
         self.one_hot = eye(len(self.Σ), dtype=Rational(0))
-
-        # We start with an zero hidden state in phase 1
-        self.h = zeros(self.D, 1, dtype=Rational(0))
-        self.reset()
-
-    def reset(self):
-        """Sets the initial hidden state of the RNN to the zero vector
-        indicating the first phase."""
-        self.h = zeros(self.D, 1, dtype=Rational(0))
-        self.h[Index.PHASE1] = Rational(1)
 
     def disp(self, h: Matrix):
         """Prints the content of the hidden state of the Siegelmann RNN, separated by
@@ -518,6 +526,9 @@ class TwoStackRNN:
         self.U[Index.CONF_0_1_b, Index.STACK2_EMPTY] = Rational(-10)
         self.U[Index.CONF_1_1_b, Index.STACK2_EMPTY] = Rational(-10)
 
+        self.U[Index.STACK1_ZERO, Index.STACK1_EMPTY] = Rational(-3)
+        self.U[Index.STACK2_ZERO, Index.STACK2_EMPTY] = Rational(-3)
+
     def initialize_transition_function(self):
         # transition function
         for i in range(Index.STACK1_PUSH_0, Index.STACK1_NOOP + 1):
@@ -545,7 +556,7 @@ class TwoStackRNN:
                 continue
 
             for γ_top_1, γ_top_2 in self.pda.δ[sym]:
-                (action_1, γ_new_1), (action_2, γ_new_2) = self.pda.δ[sym][
+                (action_1, γ_new_1), (action_2, γ_new_2), _ = self.pda.δ[sym][
                     (γ_top_1, γ_top_2)
                 ]
 
@@ -787,10 +798,83 @@ class TwoStackRNN:
 
         self.b[Index.ACCEPT, 0] = Rational(1)
 
-    def make_E(self):
-        ...
+    def make_emission_params(self):
+        for ii in range(9):
+            self.bw[ii] = Rational(-1)
 
-    def __call__(self, a: Sym):
+        self.W[EmissionIndex.CONF_BOTBOT, Index.STACK1_EMPTY] = Rational(1)
+        self.W[EmissionIndex.CONF_BOT0, Index.STACK1_EMPTY] = Rational(1)
+        self.W[EmissionIndex.CONF_BOT1, Index.STACK1_EMPTY] = Rational(1)
+        self.W[EmissionIndex.CONF_0BOT, Index.STACK1_ZERO] = Rational(1)
+        self.W[EmissionIndex.CONF_00, Index.STACK1_ZERO] = Rational(1)
+        self.W[EmissionIndex.CONF_01, Index.STACK1_ZERO] = Rational(1)
+        self.W[EmissionIndex.CONF_1BOT, Index.STACK1_ONE] = Rational(1)
+        self.W[EmissionIndex.CONF_10, Index.STACK1_ONE] = Rational(1)
+        self.W[EmissionIndex.CONF_11, Index.STACK1_ONE] = Rational(1)
+        self.W[EmissionIndex.CONF_BOTBOT, Index.STACK2_EMPTY] = Rational(1)
+        self.W[EmissionIndex.CONF_0BOT, Index.STACK2_EMPTY] = Rational(1)
+        self.W[EmissionIndex.CONF_1BOT, Index.STACK2_EMPTY] = Rational(1)
+        self.W[EmissionIndex.CONF_BOT0, Index.STACK2_ZERO] = Rational(1)
+        self.W[EmissionIndex.CONF_00, Index.STACK2_ZERO] = Rational(1)
+        self.W[EmissionIndex.CONF_10, Index.STACK2_ZERO] = Rational(1)
+        self.W[EmissionIndex.CONF_BOT1, Index.STACK2_ONE] = Rational(1)
+        self.W[EmissionIndex.CONF_01, Index.STACK2_ONE] = Rational(1)
+        self.W[EmissionIndex.CONF_11, Index.STACK2_ONE] = Rational(1)
+
+        for a in self.Σ - {EOS}:
+            d = self.sym2idx[a]
+            self.E[d, EmissionIndex.CONF_BOTBOT] = log(self.pda.δ[a][(BOT, BOT)][2])
+            self.E[d, EmissionIndex.CONF_BOT0] = log(self.pda.δ[a][(BOT, Sym("0"))][2])
+            self.E[d, EmissionIndex.CONF_BOT1] = log(self.pda.δ[a][(BOT, Sym("1"))][2])
+            self.E[d, EmissionIndex.CONF_0BOT] = log(self.pda.δ[a][(Sym("0"), BOT)][2])
+            self.E[d, EmissionIndex.CONF_00] = log(
+                self.pda.δ[a][(Sym("0"), Sym("0"))][2]
+            )
+            self.E[d, EmissionIndex.CONF_01] = log(
+                self.pda.δ[a][(Sym("0"), Sym("1"))][2]
+            )
+            self.E[d, EmissionIndex.CONF_1BOT] = log(self.pda.δ[a][(Sym("1"), BOT)][2])
+            self.E[d, EmissionIndex.CONF_10] = log(
+                self.pda.δ[a][(Sym("1"), Sym("0"))][2]
+            )
+            self.E[d, EmissionIndex.CONF_11] = log(
+                self.pda.δ[a][(Sym("1"), Sym("1"))][2]
+            )
+
+    def initial_hidden_state(self) -> Matrix:
+        """Sets the initial hidden state of the RNN to the zero vector
+        indicating the first phase."""
+        # We start with an zero hidden state in phase 1
+        h = zeros(self.D, 1, dtype=Rational(0))
+        h[Index.PHASE1] = Rational(1)
+        return h
+
+    def accept(self, y: Union[str, String]) -> Tuple[bool, float]:
+        """Checks whether the RNN accepts the input string `y`.
+
+        Args:
+            y (String): The input string.
+
+        Returns:
+            bool: True if the RNN accepts the input string, False otherwise.
+        """
+        if isinstance(y, str):
+            y = String(y)
+        y.y += [EOS]
+
+        h, logp = self.initial_hidden_state(), Rational(0)
+        for a in y:
+            print(f"sym = {a}")
+            h, _acc, _logp = self.step(h, a)
+            print(f"logp = {_logp}")
+            logp += _logp
+
+        return h[Index.ACCEPT] == Rational(1), logp
+
+    def __call__(self, y: Union[str, String]) -> Tuple[bool, float]:
+        return self.accept(y)
+
+    def step(self, h: Matrix, a: Sym):
         """Performs a step of the Siegelmann RNN."""
         assert a in self.Σ
 
@@ -801,41 +885,48 @@ class TwoStackRNN:
         # 4) Consolidate
 
         def apply(_h):
-            tmp = self.U * _h + self.V * self.one_hot.col(sym2idx[a]) + self.b
+            z = self.U * _h + self.V * self.one_hot.col(self.sym2idx[a]) + self.b
 
-            self.disp(tmp)
-
-            h2 = zeros(self.D, 1, dtype=Rational(0))
-
+            hʼ = zeros(self.D, 1, dtype=Rational(0))
             for i in range(self.D):
-                h2[i] = σ.subs(x, tmp[i])
-            return h2
+                hʼ[i] = σ.subs(x, z[i])
+            return hʼ
 
-        h = self.h
-        print("\n\n\n\n >>>> START:")
-        self.disp(h)
-        print(cantor_decode(h[Index.STACK1]), cantor_decode(h[Index.STACK2]))
+        def apply_emission(_h):
+            u = self.W * h + self.bw
+            # print(u)
 
-        print("\n\n----------------------------\n>>>>> PHASE 1")
-        h = apply(h)
-        print(cantor_decode(h[Index.STACK1]), cantor_decode(h[Index.STACK2]))
-        self.disp(h)
-        print("\n\n----------------------------\n>>>>> PHASE 2")
-        h = apply(h)
-        print(cantor_decode(h[Index.STACK1]), cantor_decode(h[Index.STACK2]))
-        self.disp(h)
-        print("\n\n----------------------------\n>>>>> PHASE 3")
-        h = apply(h)
-        print(cantor_decode(h[Index.STACK1]), cantor_decode(h[Index.STACK2]))
-        self.disp(h)
-        print("\n\n----------------------------\n>>>>> PHASE 4")
-        h = apply(h)
-        print(cantor_decode(h[Index.STACK1]), cantor_decode(h[Index.STACK2]))
-        self.disp(h)
-        print(cantor_decode(h[Index.STACK1]), cantor_decode(h[Index.STACK2]))
-        self.disp(h)
-        self.h = h
-        print("\n\n\n\n\n")
+            uʼ = zeros(9, 1, dtype=Rational(0))
+            for i in range(9):
+                uʼ[i] = σ.subs(x, u[i])
 
-        return self.h, self.h[Index.ACCEPT]
+            # print(uʼ)
+            return self.E * uʼ
 
+        # print("\n\n\n\n >>>> START:")
+        # self.disp(h)
+        # print(cantor_decode(h[Index.STACK1]), cantor_decode(h[Index.STACK2]))
+
+        # print("\n\n----------------------------\n>>>>> PHASE 1")
+        h = apply(h)
+        # print(cantor_decode(h[Index.STACK1]), cantor_decode(h[Index.STACK2]))
+        # self.disp(h)
+        # print("\n\n----------------------------\n>>>>> PHASE 2")
+        h = apply(h)
+        # print(cantor_decode(h[Index.STACK1]), cantor_decode(h[Index.STACK2]))
+        # self.disp(h)
+        logits = apply_emission(h)
+        # print(logits)
+        # print("\n\n----------------------------\n>>>>> PHASE 3")
+        h = apply(h)
+        # print(cantor_decode(h[Index.STACK1]), cantor_decode(h[Index.STACK2]))
+        # self.disp(h)
+        # print("\n\n----------------------------\n>>>>> PHASE 4")
+        h = apply(h)
+        # print(cantor_decode(h[Index.STACK1]), cantor_decode(h[Index.STACK2]))
+        # self.disp(h)
+        # print(cantor_decode(h[Index.STACK1]), cantor_decode(h[Index.STACK2]))
+        # self.disp(h)
+        # print("\n\n\n\n\n")
+
+        return h, h[Index.ACCEPT], logits[self.sym2idx[a]]

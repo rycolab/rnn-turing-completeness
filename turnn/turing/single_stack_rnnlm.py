@@ -1,18 +1,7 @@
 from enum import IntEnum, unique
 from typing import Tuple, Union
 
-from sympy import (
-    Abs,
-    Matrix,
-    Piecewise,
-    Rational,
-    Symbol,
-    exp,
-    eye,
-    log,
-    sympify,
-    zeros,
-)
+from sympy import Abs, Matrix, Piecewise, Rational, Symbol, eye, log, sympify, zeros
 
 from turnn.base.string import String
 from turnn.base.symbol import BOT, EOS, Sym, ε
@@ -20,10 +9,6 @@ from turnn.turing.pda import Action, SingleStackPDA
 
 x = Symbol("x")
 σ = Piecewise((Rational(0), x <= 0), (Rational(1), x >= 1), (Abs(x) <= sympify(1)))
-
-
-def softmax(h):
-    return exp(h) / sum(exp(h))
 
 
 @unique
@@ -252,8 +237,6 @@ class SingleStackRNN:
 
         # This bit ensures that we can't be empty and non-empty
         # It erases the effects of always setting the PEEK0 bit to 1
-        self.U[Index.STACK_ZERO, Index.STACK_EMPTY] = Rational(-3)
-        self.U[Index.STACK_ZERO, Index.STACK_EMPTY] = Rational(-3)
         self.U[Index.STACK_ZERO, Index.STACK_EMPTY] = Rational(-3)
         self.U[Index.CONF_0_a, Index.STACK_EMPTY] = Rational(-1)
         self.U[Index.CONF_0_b, Index.STACK_EMPTY] = Rational(-1)

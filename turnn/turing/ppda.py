@@ -1,4 +1,3 @@
-import random
 from enum import IntEnum, unique
 from itertools import product
 from math import log
@@ -7,7 +6,7 @@ from typing import List, Tuple, Union
 import numpy as np
 
 from turnn.base.string import String
-from turnn.base.symbol import BOT, Sym, ε
+from turnn.base.symbol import BOT, Sym
 
 
 @unique
@@ -20,7 +19,6 @@ class Action(IntEnum):
 class SingleStackPDA:
     def __init__(
         self,
-        # Σ={Sym("a"), Sym("b"), ε},
         Σ={Sym("a"), Sym("b")},
         Γ={BOT, Sym("0"), Sym("1")},
         seed: int = 42,
@@ -70,7 +68,6 @@ class SingleStackPDA:
         for a in y:
             stack, p = self.step(stack, a)
             logp += log(p)
-            print(f"logp: {log(p)}")
 
         return stack == [BOT], logp
 
@@ -109,6 +106,7 @@ class TwoStackPDA:
         Γ_1={BOT, Sym("0"), Sym("1")},
         Γ_2={BOT, Sym("0"), Sym("1")},
         seed: int = 42,
+        randomize: bool = True,
     ):
         self.seed = seed
 
@@ -116,9 +114,13 @@ class TwoStackPDA:
         self.Γ_1 = Γ_1
         self.Γ_2 = Γ_2
 
-        self.stacks = [[BOT], [BOT]]
-        self.δ = {}
-        self._random_δ()
+        # δ: Σ × (Γ_1 × Γ_2) → (({PUSH, POP, NOOP} × Γ_1 × Γ_2) × R)
+        self.δ = {
+            sym: {(γ_1, γ_2): {} for (γ_1, γ_2) in product(self.Γ_1, self.Γ_2)}
+            for sym in self.Σ
+        }
+        if randomize:
+            self._random_δ()
 
     def _execute_action(self, stack, action, γ_new):
         if action == Action.PUSH:
@@ -130,52 +132,66 @@ class TwoStackPDA:
         else:
             raise Exception
 
-    def step(self, y):
-        assert y in self.Σ
+    def step(
+        self, stacks: Tuple[List[Sym], List[Sym]], a: Sym
+    ) -> Tuple[Tuple[List[Sym], List[Sym]], float]:
+        assert a in self.Σ
 
-        γ_top_1, γ_top_2 = self.stacks[0][-1], self.stacks[1][-1]
-        (action_1, γ_new_1), (action_2, γ_new_2) = self.δ[y][(γ_top_1, γ_top_2)]
+        γ_1, γ_2 = stacks[0][-1], stacks[1][-1]
+        (action_1, γ_1ʼ), (action_2, γ_2ʼ) = self.δ[a][(γ_1, γ_2)][:2]
 
-        self._execute_action(self.stacks[0], action_1, γ_new_1)
-        self._execute_action(self.stacks[1], action_2, γ_new_2)
+        self._execute_action(stacks[0], action_1, γ_1ʼ)
+        self._execute_action(stacks[1], action_2, γ_2ʼ)
 
-    def accept(self, y):
-        for sym in y:
-            self.step(sym)
+        return stacks, self.δ[a][(γ_1, γ_2)][2]
 
-        return self.stacks[0] == [BOT] and self.stacks[1] == [BOT]
+    def accept(self, y: Union[str, String]) -> Tuple[bool, float]:
+        if isinstance(y, str):
+            y = String(y)
 
-    def _get_action(self, γ_top: Sym, pushes: List[Tuple[Action, Sym]]):
+        stacks = [BOT], [BOT]
+        logp = 0
+
+        for a in y:
+            stacks, p = self.step(stacks, a)
+            logp += log(p)
+
+        return stacks[0] == [BOT] and stacks[1] == [BOT], logp
+
+    def __call__(self, y: Union[str, String]) -> Tuple[bool, float]:
+        return self.accept(y)
+
+    def _get_action(
+        self, γ_top: Sym, pushes: List[Tuple[Action, Sym]], rng: np.random.Generator
+    ):
         if γ_top == BOT:
-            flip = random.randint(0, 1)
+            flip = rng.integers(0, 1, endpoint=True)
             if flip == 0:
                 action, γ_new = (Action.NOOP, γ_top)
             else:
-                action, γ_new = random.choice(pushes)
+                action, γ_new = tuple(rng.choice(pushes))
         else:
-            flip = random.randint(0, 2)
+            flip = rng.integers(0, 2, endpoint=True)
             if flip == 0:
                 action, γ_new = (Action.NOOP, γ_top)
             elif flip == 1:
                 action, γ_new = (Action.POP, γ_top)
             else:
-                action, γ_new = random.choice(pushes)
+                action, γ_new = tuple(rng.choice(pushes))
 
         return action, γ_new
 
     def _random_δ(self):
-        random.seed(self.seed)
+        rng = np.random.default_rng(self.seed)
 
         pushes = [
-            [(Action.PUSH, γ) for γ in Γ if γ != BOT] for Γ in [self.Γ_1, self.Γ_2]
+            [(Action.PUSH, γ) for γ in Γ] for Γ in [self.Γ_1 - {BOT}, self.Γ_2 - {BOT}]
         ]
 
-        for a in self.Σ:
-            if a not in self.δ:
-                self.δ[a] = {}
+        for γ_1, γ_2 in product(self.Γ_1, self.Γ_2):
+            α = rng.dirichlet(np.ones(len(self.Σ)))
+            for ii, a in enumerate(self.Σ):
+                action_1, γ_1ʼ = self._get_action(γ_1, pushes[0], rng)
+                action_2, γ_2ʼ = self._get_action(γ_2, pushes[1], rng)
 
-            for γ_1, γ_2 in product(self.Γ_1, self.Γ_2):
-                action_1, γ_new_1 = self._get_action(γ_1, pushes[0])
-                action_2, γ_new_2 = self._get_action(γ_2, pushes[1])
-
-                self.δ[a][(γ_1, γ_2)] = (action_1, γ_new_1), (action_2, γ_new_2)
+                self.δ[a][(γ_1, γ_2)] = (action_1, γ_1ʼ), (action_2, γ_2ʼ), α[ii]

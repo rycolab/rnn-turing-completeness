@@ -1,18 +1,31 @@
+""" Implements an RNN language model simulating a single-stack 
+*probabilistic* PDA.
+See `turnn/turing/single_stack_rnn.py` for the unweighted version of the
+same construction."""
+
 from enum import IntEnum, unique
 from typing import Tuple, Union
 
-from sympy import Abs, Matrix, Piecewise, Rational, Symbol, eye, log, sympify, zeros
+from sympy import (Abs, Matrix, Piecewise, Rational, Symbol, eye, log, sympify,
+                   zeros)
 
 from turnn.base.string import String
 from turnn.base.symbol import BOT, EOS, Sym, ε
+# from turnn.base.utils import cantor_decode
 from turnn.turing.pda import Action, SingleStackPDA
 
+# The element-wise saturated sigmoid function
 x = Symbol("x")
 σ = Piecewise((Rational(0), x <= 0), (Rational(1), x >= 1), (Abs(x) <= sympify(1)))
 
 
 @unique
 class Index(IntEnum):
+    """This class is used to index the hidden state of the RNN for two
+    stacks by naming the individual dimensions of the hidden state with the role
+    they play in simulating the PDA.
+    """
+
     # (1) Data component
     STACK = 0
     BUFFER1 = 1
@@ -56,15 +69,6 @@ class Index(IntEnum):
 
     # (6) Acceptance component
     ACCEPT = 27
-
-
-def cantor_decode(x):
-    stack = [BOT]
-    if x.p == 0:
-        return stack
-    return stack + list(
-        map(lambda x: Sym("0") if x == "1" else Sym("1"), reversed(list(str(x.p))))
-    )
 
 
 def enc_peek(x):  # noqa: C901
@@ -119,6 +123,46 @@ def conf2idx(γ: Sym, sym: Sym):  # noqa: C901
 
 
 class SingleStackRNN:
+    """
+    An implementation of an Elman RNN language model that simulates a probabilistic PDA.
+    It computes the next state h_t+1 from the current state h_t by applying the
+    Elman update rule four times:
+    h' = σ(U * h + V * y + b)
+    where the matrices U, V and the vector b are computed from the PDA and
+    the input symbol y is one-hot encoded.
+    After four applications of the update rule, the new hidden state represents the
+    new configuration of the PDA.
+
+    The hidden state is composed of six components:
+    1. The data component
+    2. The phase component
+    3. The stack configurations component
+    4. The stacks and input configuration component
+    5. The computation component
+    6. The acceptance component
+
+    1. The first component contains the cells containing the encodings of the stack
+    along with buffer cells through which the stack is passed during the
+    four-stage computation.
+    2. The second component simply denotes the current phase of the computation, and is
+    only included for keeping track of the computation.
+    3. The third component contains the encoding of the stack at the current time step,
+    i.e., it flags whether the stacks are empty or have a 0/1 on the top.
+    4. The fourth component contains the encoding of the current input symbol together
+    with the stacks.
+    5. The fifth component contains cells to which the current stack configuration is
+    copied and modified according to the action of the PDA.
+    6. The sixth component contains a cell that are set to 1 after reading in the EOS
+    symbol if the PDA accepts the input string appearing before EOS.
+
+    The hidden state is then used to index the output matrix of (log) probabilities
+    such that the probability of the next symbol is computed as
+    p(y_t+1 | y_t, h_t) = exp(E * h_t+1) / sum(exp(E * h_t+1))
+    where E is the emission matrix.
+    The log probabilities are then summed up over the entire string to form the log
+    probability of the string, which matches the one of the simulated PPDA.
+    """
+
     def __init__(self, pda: SingleStackPDA):
         self.pda = pda
         self.Σ = pda.Σ.union({EOS})  # In contrast to the globally normalized PDA,
@@ -222,7 +266,7 @@ class SingleStackRNN:
     def make_configuration_detector(self):
         # PHASE 2: This submatrix corresponds to the actions available given any
         # configuration of the stack, captured at EMPTY/PEEK locations.
-        # This corresponds to the emmisions
+        # This corresponds to the emissions
         # These then get "intersected" with the symbol embeddings to select a or b
         self.U[Index.CONF_BOT_a, Index.STACK_EMPTY] = Rational(1)
         self.U[Index.CONF_BOT_b, Index.STACK_EMPTY] = Rational(1)
@@ -241,9 +285,6 @@ class SingleStackRNN:
         self.U[Index.CONF_0_a, Index.STACK_EMPTY] = Rational(-1)
         self.U[Index.CONF_0_b, Index.STACK_EMPTY] = Rational(-1)
         self.U[Index.CONF_0_EOS, Index.STACK_EMPTY] = Rational(-1)
-        # self.U[Index.CONF_1_a, Index.STACK_EMPTY] = Rational(-10)
-        # self.U[Index.CONF_1_b, Index.STACK_EMPTY] = Rational(-10)
-        # self.U[Index.CONF_1_EOS, Index.STACK_EMPTY] = Rational(-10)
 
     def initialize_transition_function(self):
         # transition function
@@ -428,6 +469,8 @@ class SingleStackRNN:
         self.b[Index.ACCEPT, 0] = Rational(1)
 
     def make_E(self):
+        # Indexes the relevant (log) probabilities in output matrix based on the
+        # one-hot representation of the stack configurations.
         for a in self.Σ - {EOS}:
             d = self.sym2idx[a]
             self.E[d, Index.STACK_EMPTY] = log(self.pda.δ[a][BOT][1])
@@ -443,13 +486,14 @@ class SingleStackRNN:
         return h
 
     def accept(self, y: Union[str, String]) -> Tuple[bool, float]:
-        """Checks whether the RNN accepts the input string `y`.
+        """Computes the acceptance probability of a string and whether it is accepted.
 
         Args:
-            y (String): The input string.
+            y (Union[str, String]): The string to be accepted.
 
         Returns:
-            bool: True if the RNN accepts the input string, False otherwise.
+            Tuple[bool, float]: Whether the string is accepted
+            and the acceptance probability.
         """
         if isinstance(y, str):
             y = String(y)
@@ -465,10 +509,30 @@ class SingleStackRNN:
         return h[Index.ACCEPT] == Rational(1), logp
 
     def __call__(self, y: Union[str, String]) -> Tuple[bool, float]:
+        """Computes the acceptance probability of a string and whether it is accepted
+        by simply calling the `accept` method.
+
+        Args:
+            y (Union[str, String]): The string to be accepted.
+
+        Returns:
+            Tuple[bool, float]: Whether the string is accepted
+            and the acceptance probability.
+        """
         return self.accept(y)
 
     def step(self, h: Matrix, a: Sym) -> Tuple[Matrix, Rational, Rational]:
-        """Performs a step of the RNN."""
+        """Performs a single whole step of the Siegelmann RNN composed of the four
+        sub-steps/phases.
+
+        Args:
+            h (Matrix): The current hidden state of the RNN.
+            a (Sym): The current input symbol.
+
+        Returns:
+            Tuple[Matrix, bool, float]: The new hidden state, whether the string is
+            accepted and the acceptance probability.
+        """
         assert a in self.Σ
 
         # We have four stages in which the hidden state is updated
@@ -477,7 +541,9 @@ class SingleStackRNN:
         # 3) Transition
         # 4) Consolidate
 
-        def apply(_h):
+        def apply(_h: Matrix) -> Matrix:
+            """Performs the update (sub-)step of the Siegelmann RNN on the current
+            hidden state _h."""
             z = self.U * _h + self.V * self.one_hot.col(self.sym2idx[a]) + self.b
             hʼ = zeros(self.D, 1, dtype=Rational(0))
 
@@ -489,14 +555,14 @@ class SingleStackRNN:
         # self.disp(h)
         # print(cantor_decode(h[Index.STACK]))
 
-        print("\n\n\n\n----------------------------\n>>>>> PHASE 1")
+        # print("\n\n\n\n----------------------------\n>>>>> PHASE 1")
         h = apply(h)
         # print(cantor_decode(h[Index.STACK]))
-        self.disp(h)
-        print("\n\n\n\n----------------------------\n>>>>> PHASE 2")
+        # self.disp(h)
+        # print("\n\n\n\n----------------------------\n>>>>> PHASE 2")
         h = apply(h)
         # print(cantor_decode(h[Index.STACK]))
-        self.disp(h)
+        # self.disp(h)
         logits = self.E * h
         # print("\n\n\n\n----------------------------\n>>>>> PHASE 3")
         h = apply(h)

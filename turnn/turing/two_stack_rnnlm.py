@@ -1,20 +1,28 @@
-"""This module implements an RNN simulating a two-stack PDA.
-The construction is original but based on the one in Siegelmann and Sontag (1995) 
-[https://binds.cs.umass.edu/papers/1995_Siegelmann_JComSysSci.pdf]"""
+"""This module implements an RNN *language model* simulating a 
+*probabilistic* two-stack PDA.
+The construction of the controller (unweighted part) is original but based on the one in
+Siegelmann and Sontag (1995)
+[https://binds.cs.umass.edu/papers/1995_Siegelmann_JComSysSci.pdf]
+while the weighted part is original.
+
+See `turnn/turing/two_stack_rnn.py` for the unweighted version of the
+same construction.
+"""
 
 from enum import IntEnum, unique
 from itertools import product
-from typing import List, Tuple, Union
+from typing import Tuple, Union
 
-from sympy import (Abs, Matrix, Piecewise, Rational, Symbol, eye, log, sympify,
-                   zeros)
+from sympy import Abs, Matrix, Piecewise, Rational, Symbol, eye, log, sympify, zeros
 
 from turnn.base.string import String
 from turnn.base.symbol import BOT, EOS, Sym
+
+# from turnn.base.utils import cantor_decode
 from turnn.turing.pda import Action, TwoStackPDA
 
+# The element-wise saturated sigmoid function
 x = Symbol("x")
-# This is the saturated sigmoid function
 σ = Piecewise((Rational(0), x <= 0), (Rational(1), x >= 1), (Abs(x) <= sympify(1)))
 
 
@@ -112,25 +120,6 @@ sym2idx = {
     Sym("b"): 1,
     EOS: 2,
 }
-
-
-def cantor_decode(x) -> List[Sym]:
-    """
-    This simply decodes the value of the cell in the hidden state representing a stack
-    into a sequence of symbols.
-
-    Args:
-        x: The value to be decoded into a sequence of symbols.
-
-    Returns:
-        List[Sym]: The decoded sequence of symbols.
-    """
-    stack = [BOT]
-    if x.p == 0:
-        return stack
-    return stack + list(
-        map(lambda x: Sym("0") if x == "1" else Sym("1"), reversed(list(str(x.p))))
-    )
 
 
 def conf_peek(x: Index):  # noqa: C901
@@ -264,7 +253,8 @@ def conf2idx(γ1: Sym, γ2: Sym, sym: Sym) -> Index:  # noqa: C901
 
 class TwoStackRNN:
     """
-    An implementation of an Elman RNN that simulates a two-stack PDA.
+    An implementation of an Elman RNN language model that simulates a probabilistic
+    two-stack PDA.
     It computes the next state h_t+1 from the current state h_t by applying the
     Elman update rule four times:
     h' = σ(U * h + V * y + b)
@@ -294,6 +284,14 @@ class TwoStackRNN:
     copied and modified according to the action of the PDA.
     6. The sixth component contains a cell that are set to 1 after reading in the EOS
     symbol if the PDA accepts the input string appearing before EOS.
+
+    The hidden state is then used to index the output matrix of (log) probabilities
+    such that the probability of the next symbol is computed as
+    p(y_t+1 | y_t, h_t) = exp(E * σ(W * h_t+1 + bw)) / sum(exp(E * σ(W * h_t+1 + bw)))
+    where E is the emission matrix and W and bw are the parameters of the MLP projecting
+    the hidden state to a one-hot encoding of the configuration of the two stacks.
+    The log probabilities are then summed up over the entire string to form the log
+    probability of the string, which matches the one of the simulated PPDA.
     """
 
     def __init__(self, pda: TwoStackPDA):
@@ -317,7 +315,8 @@ class TwoStackRNN:
         self.make_b()
         self.make_V()
 
-        # Emission matrix E
+        # Emission matrix E together with the MLP (defined through W and bw) that
+        # projects the hidden state into a usable one-hot encoding
         self.W = zeros(9, self.D, dtype=Rational(0))
         self.bw = zeros(9, 1, dtype=Rational(0))
         self.E = zeros(len(self.Σ), 9, dtype=Rational(0))
@@ -440,7 +439,7 @@ class TwoStackRNN:
     def make_configuration_detector(self):
         # PHASE 2: This submatrix corresponds to the actions available given any
         # configuration of the stack, captured at EMPTY/PEEK locations.
-        # This corresponds to the emmisions
+        # This corresponds to the emissions
         # These then get "intersected" with the symbol embeddings to select a or b
         self.U[Index.CONF_BOT_BOT_a, Index.STACK1_EMPTY] = Rational(1)
         self.U[Index.CONF_BOT_0_a, Index.STACK1_EMPTY] = Rational(1)
@@ -556,6 +555,8 @@ class TwoStackRNN:
                 continue
 
             for γ_top_1, γ_top_2 in self.pda.δ[sym]:
+                # This implements the *unweighted* transition function, i.e., the
+                # controller of the LM
                 (action_1, γ_new_1), (action_2, γ_new_2), _ = self.pda.δ[sym][
                     (γ_top_1, γ_top_2)
                 ]
@@ -614,9 +615,8 @@ class TwoStackRNN:
         self.U[Index.STACK2_POP_0, Index.BUFFER22] = Rational(10)
         self.U[Index.STACK2_POP_1, Index.BUFFER22] = Rational(10)
 
-        # Copy the last buffer into the NOOP cells,
-        # but only if none of the other actions
-        #  are active (handled in `make_action_detector`).
+        # Copy the last buffer into the NOOP cells, but only if none of the other
+        # actions are active (handled in `make_action_detector`).
         self.U[Index.STACK1_NOOP, Index.BUFFER21] = Rational(1)
         self.U[Index.STACK2_NOOP, Index.BUFFER22] = Rational(1)
 
@@ -802,6 +802,8 @@ class TwoStackRNN:
         for ii in range(9):
             self.bw[ii] = Rational(-1)
 
+        # Combines the two stack configurations into a one-hot encoding of a common
+        # configuration.
         self.W[EmissionIndex.CONF_BOTBOT, Index.STACK1_EMPTY] = Rational(1)
         self.W[EmissionIndex.CONF_BOT0, Index.STACK1_EMPTY] = Rational(1)
         self.W[EmissionIndex.CONF_BOT1, Index.STACK1_EMPTY] = Rational(1)
@@ -821,6 +823,8 @@ class TwoStackRNN:
         self.W[EmissionIndex.CONF_01, Index.STACK2_ONE] = Rational(1)
         self.W[EmissionIndex.CONF_11, Index.STACK2_ONE] = Rational(1)
 
+        # Indexes the relevant (log) probabilities in output matrix based on the
+        # one-hot representation of the stack configurations.
         for a in self.Σ - {EOS}:
             d = self.sym2idx[a]
             self.E[d, EmissionIndex.CONF_BOTBOT] = log(self.pda.δ[a][(BOT, BOT)][2])
@@ -850,32 +854,52 @@ class TwoStackRNN:
         return h
 
     def accept(self, y: Union[str, String]) -> Tuple[bool, float]:
-        """Checks whether the RNN accepts the input string `y`.
+        """Computes the acceptance probability of a string and whether it is accepted.
 
         Args:
-            y (String): The input string.
+            y (Union[str, String]): The string to be accepted.
 
         Returns:
-            bool: True if the RNN accepts the input string, False otherwise.
+            Tuple[bool, float]: Whether the string is accepted
+            and the acceptance probability.
         """
         if isinstance(y, str):
             y = String(y)
         y.y += [EOS]
 
+        # Process the string
         h, logp = self.initial_hidden_state(), Rational(0)
         for a in y:
-            print(f"sym = {a}")
             h, _acc, _logp = self.step(h, a)
-            print(f"logp = {_logp}")
             logp += _logp
 
         return h[Index.ACCEPT] == Rational(1), logp
 
     def __call__(self, y: Union[str, String]) -> Tuple[bool, float]:
+        """Computes the acceptance probability of a string and whether it is accepted
+        by simply calling the `accept` method.
+
+        Args:
+            y (Union[str, String]): The string to be accepted.
+
+        Returns:
+            Tuple[bool, float]: Whether the string is accepted
+            and the acceptance probability.
+        """
         return self.accept(y)
 
-    def step(self, h: Matrix, a: Sym):
-        """Performs a step of the Siegelmann RNN."""
+    def step(self, h: Matrix, a: Sym) -> Tuple[Matrix, bool, float]:
+        """Performs a single whole step of the Siegelmann RNN composed of the four
+        sub-steps/phases.
+
+        Args:
+            h (Matrix): The current hidden state of the RNN.
+            a (Sym): The current input symbol.
+
+        Returns:
+            Tuple[Matrix, bool, float]: The new hidden state, whether the string is
+            accepted and the acceptance probability.
+        """
         assert a in self.Σ
 
         # We have four stages in which the hidden state is updated
@@ -884,7 +908,9 @@ class TwoStackRNN:
         # 3) Transition
         # 4) Consolidate
 
-        def apply(_h):
+        def apply(_h: Matrix) -> Matrix:
+            """Performs the update (sub-)step of the Siegelmann RNN on the current
+            hidden state _h."""
             z = self.U * _h + self.V * self.one_hot.col(self.sym2idx[a]) + self.b
 
             hʼ = zeros(self.D, 1, dtype=Rational(0))
@@ -892,7 +918,9 @@ class TwoStackRNN:
                 hʼ[i] = σ.subs(x, z[i])
             return hʼ
 
-        def apply_emission(_h):
+        def apply_emission(_h: Matrix) -> Matrix:
+            """Applies the MLP projecting the state to a useful one-hot encoding
+            for the emission probabilities."""
             u = self.W * h + self.bw
             # print(u)
 

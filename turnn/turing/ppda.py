@@ -40,6 +40,7 @@ class SingleStackPDA:
         γ = stack[-1]
         action, γʼ = self.δ[a][γ][0]
 
+        # Modify the stack according to the action.
         if action == Action.PUSH:
             stack.append(γʼ)
         elif action == Action.POP:
@@ -49,22 +50,34 @@ class SingleStackPDA:
         else:
             raise Exception
 
+        # Return the new stack and the probability of the action.
         return stack, self.δ[a][γ][1]
 
     @property
     def probabilistic(self):
+        """Checks if the PDA is probabilistic."""
         d = {γ: 0 for γ in self.Γ}
         for a, γ in product(self.Σ, self.Γ):
             d[γ] += self.δ[a][γ][1]
         return all(abs(d[γ] - 1) < 1e-6 for γ in self.Γ)
 
     def accept(self, y: Union[str, String]) -> Tuple[bool, float]:
+        """Computes the acceptance probability of a string. Returns a tuple of
+        the acceptance status and the log probability.
+
+        Args:
+            y (Union[str, String]): The string to be accepted.
+
+        Returns:
+            Tuple[bool, float]: The acceptance status and the log probability.
+        """
         if isinstance(y, str):
             y = String(y)
 
         stack = [BOT]
         logp = 0
 
+        # Simulate a run of the PDA. (Assumes that the PDA is deterministic.)
         for a in y:
             stack, p = self.step(stack, a)
             logp += log(p)
@@ -72,9 +85,20 @@ class SingleStackPDA:
         return stack == [BOT], logp
 
     def __call__(self, y: Union[str, String]) -> Tuple[bool, float]:
+        """Computes the acceptance probability of a string. Returns a tuple of
+        the acceptance status and the log probability.
+        It simply calls the accept method.
+
+        Args:
+            y (Union[str, String]): The string to be accepted.
+
+        Returns:
+            Tuple[bool, float]: The acceptance status and the log probability.
+        """
         return self.accept(y)
 
     def _random_δ(self):
+        """Initializes a random transition function and with it a random PPDA."""
         rng = np.random.default_rng(self.seed)
 
         pushes = list((Action.PUSH, γ) for γ in (self.Γ - {BOT}))
@@ -122,7 +146,8 @@ class TwoStackPDA:
         if randomize:
             self._random_δ()
 
-    def _execute_action(self, stack, action, γ_new):
+    def _execute_action(self, stack: List[Sym], action: Action, γ_new: Sym):
+        """Commits an action to a the current stack configuration."""
         if action == Action.PUSH:
             stack.append(γ_new)
         elif action == Action.POP:
@@ -135,6 +160,17 @@ class TwoStackPDA:
     def step(
         self, stacks: Tuple[List[Sym], List[Sym]], a: Sym
     ) -> Tuple[Tuple[List[Sym], List[Sym]], float]:
+        """Executes a step of the PDA. Returns a tuple of the new stacks and the
+        probability of the action.
+
+        Args:
+            stacks (Tuple[List[Sym], List[Sym]]): The current stacks.
+            a (Sym): The current symbol.
+
+        Returns:
+            Tuple[Tuple[List[Sym], List[Sym]], float]: The new stacks and the
+                probability of the action.
+        """
         assert a in self.Σ
 
         γ_1, γ_2 = stacks[0][-1], stacks[1][-1]
@@ -146,6 +182,15 @@ class TwoStackPDA:
         return stacks, self.δ[a][(γ_1, γ_2)][2]
 
     def accept(self, y: Union[str, String]) -> Tuple[bool, float]:
+        """Computes the acceptance probability of a string. Returns a tuple of
+        the acceptance status and the log probability.
+
+        Args:
+            y (Union[str, String]): The string to be accepted.
+
+        Returns:
+            Tuple[bool, float]: The acceptance status and the log probability.
+        """
         if isinstance(y, str):
             y = String(y)
 
@@ -159,11 +204,22 @@ class TwoStackPDA:
         return stacks[0] == [BOT] and stacks[1] == [BOT], logp
 
     def __call__(self, y: Union[str, String]) -> Tuple[bool, float]:
+        """Computes the acceptance probability of a string. Returns a tuple of
+        the acceptance status and the log probability.
+        It simply calls the accept method.
+
+        Args:
+            y (Union[str, String]): The string to be accepted.
+
+        Returns:
+            Tuple[bool, float]: The acceptance status and the log probability.
+        """
         return self.accept(y)
 
     def _get_action(
         self, γ_top: Sym, pushes: List[Tuple[Action, Sym]], rng: np.random.Generator
     ):
+        """Returns a random action and a random symbol for a given stack top."""
         if γ_top == BOT:
             flip = rng.integers(0, 1, endpoint=True)
             if flip == 0:
@@ -182,6 +238,7 @@ class TwoStackPDA:
         return action, γ_new
 
     def _random_δ(self):
+        """Initializes a random transition function and with it a random PPDA."""
         rng = np.random.default_rng(self.seed)
 
         pushes = [

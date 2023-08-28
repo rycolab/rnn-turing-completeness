@@ -1,9 +1,14 @@
+""" This is the *non-LM* implementation of an RNN simulating an
+*unweighted* PDA with a single stack.
+See `turnn/turing/single_stack_rnnlm.py` for the *LM* implementation."""
+
 from enum import IntEnum, unique
 
 from sympy import Abs, Matrix, Piecewise, Rational, Symbol, eye, sympify, zeros
 
 from turnn.base.string import String
 from turnn.base.symbol import BOT, EOS, Sym
+from turnn.base.utils import cantor_decode
 from turnn.turing.pda import Action, SingleStackPDA
 
 x = Symbol("x")
@@ -46,15 +51,6 @@ class Index(IntEnum):
 
     # Signals the acceptance of the input string
     ACCEPT = 24
-
-
-def cantor_decode(x):
-    stack = [BOT]
-    if x.p == 0:
-        return stack
-    return stack + list(
-        map(lambda x: Sym("0") if x == "1" else Sym("1"), reversed(list(str(x.p))))
-    )
 
 
 def enc_peek(x):  # noqa: C901

@@ -1,15 +1,18 @@
-"""This module implements an RNN simulating a two-stack PDA.
-The construction is original but based on the one in Siegelmann and Sontag (1995) 
-[https://binds.cs.umass.edu/papers/1995_Siegelmann_JComSysSci.pdf]"""
+"""This module implements a *non-LM* RNN simulating an *unweighted* two-stack PDA.
+The construction is original but based on the one in Siegelmann and Sontag (1995)
+[https://binds.cs.umass.edu/papers/1995_Siegelmann_JComSysSci.pdf]
+
+See `turnn/turing/two_stack_rnnlm.py` for the *language model* version of this RNN.
+
+"""
 
 from enum import IntEnum, unique
 from itertools import product
-from pprint import pprint
-from typing import List
 
 from sympy import Abs, Matrix, Piecewise, Rational, Symbol, eye, sympify, zeros
 
 from turnn.base.symbol import BOT, EOS, Sym
+from turnn.base.utils import cantor_decode
 from turnn.turing.pda import Action, TwoStackPDA
 
 x = Symbol("x")
@@ -99,25 +102,6 @@ sym2idx = {
     Sym("b"): 1,
     EOS: 2,
 }
-
-
-def cantor_decode(x) -> List[Sym]:
-    """
-    This simply decodes the value of the cell in the hidden state representing a stack
-    into a sequence of symbols.
-
-    Args:
-        x: The value to be decoded into a sequence of symbols.
-
-    Returns:
-        List[Sym]: The decoded sequence of symbols.
-    """
-    stack = [BOT]
-    if x.p == 0:
-        return stack
-    return stack + list(
-        map(lambda x: Sym("0") if x == "1" else Sym("1"), reversed(list(str(x.p))))
-    )
 
 
 def conf_peek(x: Index):  # noqa: C901

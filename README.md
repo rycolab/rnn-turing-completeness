@@ -1,6 +1,11 @@
-A teaching library for proving the Turing completeness of recurrent neural network language models. 
+Code accompanying the EMNLP 2023 publication "On the Representational Capacity of Recurrent Neural Language Models".
+
+This repository contains a library for proving the Turing completeness of recurrent neural network language models. 
+Specifically, it includes implementations of weighted single-stack and two-stack pushdown automata encoded in recurrent neural nets (RNNs). 
+Since two-stack pushdown automata are equivalent to Turing machines, this shows by construction that RNNs are Turing complete, and can even simulate certain kinds of probabilistic Turing machines.
+
 Implementation programmed by Ryan Cotterell and Anej Svete.
-The inspiration for the "proof by code" is [Siegelmann and Sontag (1995)](https://binds.cs.umass.edu/papers/1995_Siegelmann_JComSysSci.pdf). 
+The original inspiration for the "proof by code" is [Siegelmann and Sontag (1995)](https://binds.cs.umass.edu/papers/1995_Siegelmann_JComSysSci.pdf). 
 
 ## Getting started with the code
 

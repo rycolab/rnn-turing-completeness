@@ -1,4 +1,4 @@
-Code accompanying the EMNLP 2023 publication "On the Representational Capacity of Recurrent Neural Language Models".
+Code accompanying the EMNLP 2023 publication ["On the Representational Capacity of Recurrent Neural Language Models"](https://arxiv.org/abs/2310.12942).
 
 This repository contains a library for proving the Turing completeness of recurrent neural network language models. 
 Specifically, it includes implementations of weighted single-stack and two-stack pushdown automata encoded in recurrent neural nets (RNNs). 
